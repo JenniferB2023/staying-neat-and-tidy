@@ -1,0 +1,127 @@
+import React, { useState, useEffect, useRef } from "react";
+import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { motion } from "framer-motion";
+import { Trash2, QrCode } from "lucide-react";
+import { Html5Qrcode } from "html5-qrcode";
+
+export default function InventoryTrackerLocal() {
+  const EXPIRY_WARNING_DAYS = 5;
+  const scannerRef = useRef(null);
+  const [items, setItems] = useState([]);
+  const [newItem, setNewItem] = useState({ name: "", category: "", quantity: "", expiration: "" });
+  const [widgetMode, setWidgetMode] = useState(false);
+  const [scanning, setScanning] = useState(false);
+
+  // ===== Load from localStorage =====
+  useEffect(() => {
+    const stored = localStorage.getItem("inventoryItems");
+    if (stored) setItems(JSON.parse(stored));
+  }, []);
+
+  // ===== Save to localStorage =====
+  useEffect(() => {
+    localStorage.setItem("inventoryItems", JSON.stringify(items));
+  }, [items]);
+
+  // ===== Add / Delete =====
+  const addItem = (item = null) => {
+    const finalItem = item || newItem;
+    if (!finalItem.name) return;
+    setItems([...items, { ...finalItem, id: Date.now() }]);
+    if (!item) setNewItem({ name: "", category: "", quantity: "", expiration: "" });
+  };
+
+  const deleteItem = (id) => {
+    setItems(items.filter((i) => i.id !== id));
+  };
+
+  // ===== Expiration notifications =====
+  useEffect(() => {
+    if (!items.length || !("Notification" in window)) return;
+    const now = new Date();
+    items.forEach((item) => {
+      if (!item.expiration) return;
+      const diffDays = Math.ceil((new Date(item.expiration) - now) / (1000 * 60 * 60 * 24));
+      if (diffDays === EXPIRY_WARNING_DAYS && Notification.permission === "granted") {
+        new Notification("🌸 Expiring Soon", { body: `${item.name} expires in ${EXPIRY_WARNING_DAYS} days!` });
+      }
+    });
+  }, [items]);
+
+  // ===== Barcode scanning =====
+  const startScanner = async () => {
+    if (!scannerRef.current) return;
+    setScanning(true);
+    const html5QrCode = new Html5Qrcode("barcode-reader");
+
+    try {
+      await html5QrCode.start(
+        { facingMode: "environment" },
+        { fps: 10, qrbox: 250 },
+        (decodedText) => {
+          addItem({ name: decodedText, category: "Scanned Item", quantity: 1, expiration: "" });
+          html5QrCode.stop();
+          setScanning(false);
+        }
+      );
+    } catch (err) {
+      console.error("Barcode scanning failed:", err);
+      setScanning(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-gradient-to-b from-pink-100 to-rose-50 p-6 font-sans">
+      <div className="flex justify-between items-center mb-6">
+        <h1 className="text-3xl font-bold text-rose-400">🌸 My Inventory</h1>
+        <Button onClick={() => setWidgetMode(!widgetMode)} className="rounded-3xl bg-pink-200">
+          {widgetMode ? "Full View" : "Widget Mode"}
+        </Button>
+      </div>
+
+      {!widgetMode && (
+        <Card className="rounded-3xl shadow-xl bg-white/80 backdrop-blur-md mb-6">
+          <CardContent className="p-6 grid md:grid-cols-5 gap-4">
+            <Input placeholder="Item" value={newItem.name} onChange={(e) => setNewItem({ ...newItem, name: e.target.value })} />
+            <Input placeholder="Category" value={newItem.category} onChange={(e) => setNewItem({ ...newItem, category: e.target.value })} />
+            <Input type="number" placeholder="Qty" value={newItem.quantity} onChange={(e) => setNewItem({ ...newItem, quantity: e.target.value })} />
+            <Input type="date" value={newItem.expiration} onChange={(e) => setNewItem({ ...newItem, expiration: e.target.value })} />
+            <Button onClick={() => addItem()} className="bg-rose-300 rounded-3xl">Add</Button>
+            <Button onClick={startScanner} className="bg-pink-200 rounded-3xl flex items-center gap-2">
+              <QrCode className="w-4 h-4"/> Scan Barcode
+            </Button>
+          </CardContent>
+          <div id="barcode-reader" className="mt-2" ref={scannerRef}></div>
+        </Card>
+      )}
+
+      <div className={widgetMode ? "space-y-2" : "grid gap-4"}>
+        {items.map((item) => (
+          <motion.div key={item.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+            <Card className={`rounded-3xl shadow-md border border-pink-200 ${widgetMode ? "p-2" : ""}`}>
+              <CardContent className="flex justify-between items-center">
+                <div>
+                  <p className="font-semibold text-rose-500">{item.name}</p>
+                  {!widgetMode && (
+                    <>
+                      <p className="text-sm">{item.category}</p>
+                      <p className="text-sm">Qty: {item.quantity}</p>
+                      {item.expiration && <p className="text-sm">Exp: {item.expiration}</p>}
+                    </>
+                  )}
+                </div>
+                {!widgetMode && (
+                  <Button variant="destructive" size="icon" onClick={() => deleteItem(item.id)}>
+                    <Trash2 className="w-4 h-4" />
+                  </Button>
+                )}
+              </CardContent>
+            </Card>
+          </motion.div>
+        ))}
+      </div>
+    </div>
+  );
+}
